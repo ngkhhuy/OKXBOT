@@ -35,6 +35,21 @@ let TRADERS = [
 
 let isShuttingDown = false;
 
+// Thêm định nghĩa headers
+const headers = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Origin': 'https://www.okx.com',
+  'Referer': 'https://www.okx.com/',
+  'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin'
+};
+
 // Thêm hàm xử lý lỗi và khởi động lại
 async function handleError(error, context = '') {
   console.error(`Error in ${context}:`, error);
@@ -191,9 +206,17 @@ async function fetchTraderPositions(traderId) {
     const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail?instType=SWAP&uniqueName=${traderId}&t=${timestamp}`;
     
     const response = await fetchWithRetry(url, { headers });
+    console.log(`Data from ${traderId}:`, response.data); // Thêm log để debug
     return response.data.data;
   } catch (error) {
     console.error(`Error fetching data for trader ${traderId}:`, error.message);
+    if (error.response) {
+      console.error('Error response:', {
+        status: error.response.status,
+        headers: error.response.headers,
+        data: error.response.data
+      });
+    }
     return [];
   }
 }
