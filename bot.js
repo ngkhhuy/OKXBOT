@@ -1,5 +1,6 @@
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
+const HttpsProxyAgent = require('https-proxy-agent');
 
 //config
 const TELEGRAM_BOT_TOKEN = '7791302769:AAGhs5-eBH50eoZW_mATccvKeJBesxCJS8g';
@@ -171,12 +172,25 @@ bot.on('message', async (msg) => {
   }
 });
 
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await axios.get(url, options);
+      return response;
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      console.log(`Retry ${i + 1}/${maxRetries} after error:`, error.message);
+      await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
+    }
+  }
+}
+
 async function fetchTraderPositions(traderId) {
   try {
     const timestamp = Date.now();
     const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail?instType=SWAP&uniqueName=${traderId}&t=${timestamp}`;
-    const response = await axios.get(url);
-    console.log(`Data from ${traderId}:`, response.data);
+    
+    const response = await fetchWithRetry(url, { headers });
     return response.data.data;
   } catch (error) {
     console.error(`Error fetching data for trader ${traderId}:`, error.message);
