@@ -27,7 +27,7 @@ let TRADERS = [
     name: 'Bot 2'
   },
   {
-    id: 'DACD5255F219FAB6',
+    id: '4D1E99B9DDD85A98',
     name: 'Bot 3'
   }
 ];
