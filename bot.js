@@ -4,7 +4,7 @@ const HttpsProxyAgent = require('https-proxy-agent');
 
 //config
 const TELEGRAM_BOT_TOKEN = '7791302769:AAGhs5-eBH50eoZW_mATccvKeJBesxCJS8g';
-const TELEGRAM_GROUP_ID = '-4703788755';
+const TELEGRAM_GROUP_ID = '-4740067865';
 const INTERVAL = 10000;
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
