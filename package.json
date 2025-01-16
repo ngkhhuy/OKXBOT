@@ -1,0 +1,13 @@
+{
+  "name": "trading-bot",
+  "version": "1.0.0",
+  "main": "bot_wrapper.js",
+  "scripts": {
+    "start": "node bot_wrapper.js",
+    "bot": "node bot.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "node-telegram-bot-api": "^0.64.0"
+  }
+} 
