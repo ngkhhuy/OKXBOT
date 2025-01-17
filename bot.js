@@ -222,22 +222,21 @@ async function fetchTraderPositions(traderId) {
 }
 
 function formatMessage(trader, position, isClose = false) {
-  const timestamp = new Date(parseInt(position.openTime)).toLocaleString();
   if (isClose) {
     return `
-🔔 Đóng tín hiệu - ${trader.name}
+❌ Đóng tín hiệu - ${trader.name}
 Cặp giao dịch: ${position.instId}
 Tín hiệu: ${position.posSide.toUpperCase()}
-Giá mở: ${position.openAvgPx}
-Thời gian mở: ${timestamp}
+Giá mở: ${parseFloat(position.openAvgPx).toFixed(4)}
+Thời gian mở: ${position.openTime}
 `;
   }
   return `
-🔔 Tín hiệu mới - ${trader.name}
+ ✅ Tín hiệu mới - ${trader.name}
 Cặp giao dịch: ${position.instId}
 Tín hiệu: ${position.posSide.toUpperCase()}
-Giá mở: ${position.openAvgPx}
-Thời gian mở: ${timestamp}
+Giá mở: ${parseFloat(position.openAvgPx).toFixed(4)}
+Thời gian mở: ${position.openTime}
 `;
 }
 
