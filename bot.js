@@ -222,13 +222,18 @@ async function fetchTraderPositions(traderId) {
 }
 
 function formatMessage(trader, position, isClose = false) {
+  const date = new Date(parseInt(position.openTime));
+  // Add 7 hours to convert to GMT+7
+  date.setHours(date.getHours() + 7);
+  const timestamp = date.toISOString().replace('T', ' ').slice(0, 19);
+  
   if (isClose) {
     return `
 ❌ Đóng tín hiệu - ${trader.name}
 Cặp giao dịch: ${position.instId}
 Tín hiệu: ${position.posSide.toUpperCase()}
 Giá mở: ${parseFloat(position.openAvgPx).toFixed(4)}
-Thời gian mở: ${position.openTime}
+Thời gian mở: ${timestamp}
 `;
   }
   return `
@@ -236,7 +241,7 @@ Thời gian mở: ${position.openTime}
 Cặp giao dịch: ${position.instId}
 Tín hiệu: ${position.posSide.toUpperCase()}
 Giá mở: ${parseFloat(position.openAvgPx).toFixed(4)}
-Thời gian mở: ${position.openTime}
+Thời gian mở: ${timestamp}
 `;
 }
 
