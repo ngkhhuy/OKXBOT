@@ -1,95 +1,84 @@
 const axios = require('axios');
-const HttpsProxyAgent = require('https-proxy-agent');
-const cache = require('./cache');
+const crypto = require('crypto');
 
 class API {
   constructor() {
-    // Danh sách proxy để rotate
-    this.proxies = [
-      'http://proxy1.example.com:8080',
-      'http://proxy2.example.com:8080',
-      // Thêm các proxy khác
+    // Danh sách User-Agents để rotate
+    this.userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1'
     ];
-    this.currentProxyIndex = 0;
 
-    this.headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': 'application/json',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Origin': 'https://www.okx.com',
-      'Referer': 'https://www.okx.com/'
-    };
-
-    this.retryDelays = [1000, 2000, 5000];
+    this.retryDelays = [2000, 5000, 10000]; // Tăng thời gian delay
 
     // Bind các methods với instance
     this.fetchTraderPositions = this.fetchTraderPositions.bind(this);
     this.fetchAllTradersPositions = this.fetchAllTradersPositions.bind(this);
   }
 
-  // Lấy proxy tiếp theo theo vòng tròn
-  getNextProxy() {
-    const proxy = this.proxies[this.currentProxyIndex];
-    this.currentProxyIndex = (this.currentProxyIndex + 1) % this.proxies.length;
-    return proxy;
+  // Tạo random fingerprint
+  generateFingerprint() {
+    return crypto.randomBytes(16).toString('hex');
   }
 
-  // Tạo axios instance mới với proxy
+  // Lấy random User-Agent
+  getRandomUserAgent() {
+    return this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
+  }
+
+  // Tạo axios instance mới cho mỗi request
   createAxiosInstance() {
-    const proxy = this.getNextProxy();
-    const httpsAgent = new HttpsProxyAgent(proxy);
-
+    const fingerprint = this.generateFingerprint();
+    
     return axios.create({
-      headers: this.headers,
-      httpsAgent,
-      proxy: false // Disable axios proxy handling
+      headers: {
+        'User-Agent': this.getRandomUserAgent(),
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Origin': 'https://www.okx.com',
+        'Referer': 'https://www.okx.com/',
+        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'x-cdn': 'https://www.okx.com',
+        'x-utc': '7',
+        'x-cdn-id': fingerprint,
+        'x-trace-id': fingerprint,
+        'Connection': 'keep-alive'
+      },
+      timeout: 10000
     });
-  }
-
-  async fetchWithRetry(url, options = {}, attempt = 0) {
-    try {
-      // Kiểm tra cache
-      const cacheKey = `${url}_${JSON.stringify(options)}`;
-      const cachedData = cache.get(cacheKey);
-      
-      if (cachedData) {
-        return cachedData;
-      }
-
-      const response = await this.http.get(url, options);
-      
-      // Lưu vào cache
-      cache.set(cacheKey, response.data);
-      
-      return response.data;
-    } catch (error) {
-      if (attempt >= this.retryDelays.length) {
-        throw error;
-      }
-
-      // Chờ theo thời gian retry
-      await new Promise(resolve => 
-        setTimeout(resolve, this.retryDelays[attempt])
-      );
-
-      // Thử lại
-      return this.fetchWithRetry(url, options, attempt + 1);
-    }
   }
 
   async fetchTraderPositions(traderId) {
     let attempts = 0;
-    const maxAttempts = this.proxies.length;
+    const maxAttempts = 3;
 
     while (attempts < maxAttempts) {
       try {
         const http = this.createAxiosInstance();
         const timestamp = Date.now();
-        const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail?instType=SWAP&uniqueName=${traderId}&t=${timestamp}`;
+        const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail`;
         
-        const response = await http.get(url);
+        const response = await http.get(url, {
+          params: {
+            instType: 'SWAP',
+            uniqueName: traderId,
+            t: timestamp
+          }
+        });
         
         if (response.data && response.data.data) {
+          // Thêm delay ngẫu nhiên trước khi trả về kết quả
+          const randomDelay = Math.floor(Math.random() * 1000) + 500;
+          await new Promise(resolve => setTimeout(resolve, randomDelay));
+          
           return response.data.data;
         }
         return [];
@@ -101,29 +90,40 @@ class API {
           throw error;
         }
         
-        // Đợi trước khi thử lại với proxy khác
-        await new Promise(resolve => setTimeout(resolve, this.retryDelays[0]));
+        // Đợi theo thời gian retry với thêm random delay
+        const delay = this.retryDelays[attempts - 1] + Math.floor(Math.random() * 2000);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
 
   async fetchAllTradersPositions(traders) {
-    const promises = traders.map(trader => 
-      this.fetchTraderPositions(trader.id)
-        .then(data => ({
+    // Thêm delay giữa các traders
+    const delayBetweenTraders = 2000;
+    
+    const results = [];
+    for (const trader of traders) {
+      try {
+        const data = await this.fetchTraderPositions(trader.id);
+        results.push({
           trader,
           positions: data || []
-        }))
-        .catch(error => ({
+        });
+        
+        // Đợi trước khi xử lý trader tiếp theo
+        await new Promise(resolve => 
+          setTimeout(resolve, delayBetweenTraders + Math.random() * 1000)
+        );
+      } catch (error) {
+        results.push({
           trader,
           error
-        }))
-    );
-
-    return Promise.all(promises);
+        });
+      }
+    }
+    
+    return results;
   }
 }
 
-// Export instance của API class
-const api = new API();
-module.exports = api; 
+module.exports = new API(); 
