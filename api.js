@@ -1,24 +1,49 @@
 const axios = require('axios');
+const HttpsProxyAgent = require('https-proxy-agent');
 const cache = require('./cache');
 
 class API {
   constructor() {
-    // Tạo instance axios với headers mặc định
-    this.http = axios.create({
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Origin': 'https://www.okx.com',
-        'Referer': 'https://www.okx.com/'
-      }
-    });
+    // Danh sách proxy để rotate
+    this.proxies = [
+      'http://proxy1.example.com:8080',
+      'http://proxy2.example.com:8080',
+      // Thêm các proxy khác
+    ];
+    this.currentProxyIndex = 0;
 
-    this.retryDelays = [1000, 2000, 5000]; // Thời gian chờ retry
+    this.headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Origin': 'https://www.okx.com',
+      'Referer': 'https://www.okx.com/'
+    };
+
+    this.retryDelays = [1000, 2000, 5000];
 
     // Bind các methods với instance
     this.fetchTraderPositions = this.fetchTraderPositions.bind(this);
     this.fetchAllTradersPositions = this.fetchAllTradersPositions.bind(this);
+  }
+
+  // Lấy proxy tiếp theo theo vòng tròn
+  getNextProxy() {
+    const proxy = this.proxies[this.currentProxyIndex];
+    this.currentProxyIndex = (this.currentProxyIndex + 1) % this.proxies.length;
+    return proxy;
+  }
+
+  // Tạo axios instance mới với proxy
+  createAxiosInstance() {
+    const proxy = this.getNextProxy();
+    const httpsAgent = new HttpsProxyAgent(proxy);
+
+    return axios.create({
+      headers: this.headers,
+      httpsAgent,
+      proxy: false // Disable axios proxy handling
+    });
   }
 
   async fetchWithRetry(url, options = {}, attempt = 0) {
@@ -53,28 +78,41 @@ class API {
   }
 
   async fetchTraderPositions(traderId) {
-    try {
-      const timestamp = Date.now();
-      const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail?instType=SWAP&uniqueName=${traderId}&t=${timestamp}`;
-      
-      const response = await this.http.get(url);
-      
-      if (response.data && response.data.data) {
-        return response.data.data;
+    let attempts = 0;
+    const maxAttempts = this.proxies.length;
+
+    while (attempts < maxAttempts) {
+      try {
+        const http = this.createAxiosInstance();
+        const timestamp = Date.now();
+        const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail?instType=SWAP&uniqueName=${traderId}&t=${timestamp}`;
+        
+        const response = await http.get(url);
+        
+        if (response.data && response.data.data) {
+          return response.data.data;
+        }
+        return [];
+      } catch (error) {
+        attempts++;
+        console.error(`Attempt ${attempts} failed for trader ${traderId}:`, error.message);
+        
+        if (attempts === maxAttempts) {
+          throw error;
+        }
+        
+        // Đợi trước khi thử lại với proxy khác
+        await new Promise(resolve => setTimeout(resolve, this.retryDelays[0]));
       }
-      return [];
-    } catch (error) {
-      console.error(`Error fetching positions for trader ${traderId}:`, error.message);
-      return [];
     }
   }
 
   async fetchAllTradersPositions(traders) {
     const promises = traders.map(trader => 
       this.fetchTraderPositions(trader.id)
-        .then(positions => ({
+        .then(data => ({
           trader,
-          positions: positions || []
+          positions: data || []
         }))
         .catch(error => ({
           trader,
