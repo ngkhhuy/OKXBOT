@@ -1,0 +1,10 @@
+{
+  "watch": ["*.js"],
+  "ignore": ["node_modules"],
+  "exec": "node",
+  "ext": "js,json",
+  "delay": "2000",
+  "events": {
+    "restart": "echo \"Bot restarted due to changes or errors...\""
+  }
+} 

@@ -1,381 +1,389 @@
-const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
-const HttpsProxyAgent = require('https-proxy-agent');
+const fs = require('fs').promises;
+const path = require('path');
+const { connectDB, checkSignalExists, saveSignal, getPositionsByTrader } = require('./db');
+const { fetchTraderPositions } = require('./api');
+const config = require('./config');
 
-//config
-const TELEGRAM_BOT_TOKEN = '7791302769:AAGhs5-eBH50eoZW_mATccvKeJBesxCJS8g';
-const TELEGRAM_GROUP_ID = '-4740067865';
-const INTERVAL = 10000;
+const TRADERS_FILE = path.join(__dirname, 'traders.json');
+const editStates = new Map();
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-
-// Luu trang thai cac lenh da xu ly
-const processedOrders = new Map();
-
-// Trang thai chinh sua
-const editStates = {};
-
-// Cac lenh dang mo
-const activePositions = new Map();
-
-let TRADERS = [
-  {
-    id: '3C0A650E43C9F05F',
-    name: 'Bot 1'
-  },
-  {
-    id: '6808DD0322B6F642',
-    name: 'Bot 2'
-  },
-  {
-    id: '4D1E99B9DDD85A98',
-    name: 'Bot 3'
-  }
-];
-
-let isShuttingDown = false;
-
-// Thêm định nghĩa headers
-const headers = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Accept': 'application/json',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Origin': 'https://www.okx.com',
-  'Referer': 'https://www.okx.com/',
-  'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-  'sec-ch-ua-mobile': '?0',
-  'sec-ch-ua-platform': '"Windows"',
-  'Sec-Fetch-Dest': 'empty',
-  'Sec-Fetch-Mode': 'cors',
-  'Sec-Fetch-Site': 'same-origin'
-};
-
-// Thêm hàm xử lý lỗi và khởi động lại
-async function handleError(error, context = '') {
-  console.error(`Error in ${context}:`, error);
-  
-  try {
-    await bot.sendMessage(TELEGRAM_GROUP_ID, 
-      `❌ Bot gặp lỗi: ${context}\n` +
-      `Chi tiết: ${error.message}\n` +
-      `Bot sẽ tự khởi động lại sau 5 giây.`
-    );
-  } catch (err) {
-    console.error('Failed to send error message:', err);
+// Thêm rate limit handling
+class MessageQueue {
+  constructor() {
+    this.queue = [];
+    this.isProcessing = false;
+    this.retryDelay = 1000; // 1 giây giữa các tin nhắn
   }
 
-  if (!isShuttingDown) {
-    console.log('Triggering bot restart...');
-    process.exit(1); // Thoát với mã lỗi để wrapper khởi động lại
+  async add(chatId, message, options = {}) {
+    this.queue.push({ chatId, message, options });
+    if (!this.isProcessing) {
+      this.process();
+    }
   }
-}
 
-// Xu ly lenh /edit
-bot.onText(/\/edit/, (msg) => {
-  const chatId = msg.chat.id;
-  
-  const keyboard = {
-    inline_keyboard: TRADERS.map((trader, index) => [
-      {
-        text: `${trader.name} (${trader.id})`,
-        callback_data: `edit_${index}`
-      }
-    ])
-  };
-
-  bot.sendMessage(chatId, 'Chọn Bot cần chỉnh sửa:', {
-    reply_markup: keyboard
-  });
-});
-
-// Xử lý callback query
-bot.on('callback_query', async (query) => {
-  const chatId = query.message.chat.id;
-  const data = query.data;
-
-  console.log('Received callback query:', data);
-
-  if (data.startsWith('edit_')) {
-    const index = parseInt(data.split('_')[1]);
-    console.log(`Setting edit state for index ${index}`);
-
-      // Luu trang thai chinh sua
-    editStates[chatId] = {
-      index: index,
-      isEditing: true
-    };
-    
-    console.log('Current edit states:', editStates);
-
-    // Dam bao nhan duoc phan hoi
-    await bot.sendMessage(chatId, 
-      `Nhập ID API mới cho ${TRADERS[index].name}:\n` +
-      `ID hiện tại: ${TRADERS[index].id}`,
-      {
-        reply_markup: {
-          force_reply: true
-        }
-      }
-    );
-  }
-});
-
-// Xu ly tin nhan
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  console.log('Received message:', {
-    chatId,
-    text,
-    reply: msg.reply_to_message
-  });
-
-  // Bo qua cac lenh
-  if (text && text.startsWith('/')) return;
-
-  // Kiem tra xem co phai la reply cho tin nhan cua bot khong
-  if (msg.reply_to_message && msg.reply_to_message.from.id === bot.me.id) {
-    const editState = editStates[chatId];
-    if (!editState || !editState.isEditing) return;
-
-    console.log('Processing edit message:', text);
-    console.log('Edit state:', editState);
-
-    // Kiem tra dinh dang ID
-    if (!text || text.length < 5) {
-      await bot.sendMessage(chatId, '❌ ID khong hop le. Vui long thu lai.', {
-        reply_markup: {
-          force_reply: true
-        }
-      });
+  async process() {
+    if (this.queue.length === 0) {
+      this.isProcessing = false;
       return;
     }
 
+    this.isProcessing = true;
+    const { chatId, message, options } = this.queue.shift();
+
     try {
-      const index = editState.index;
-      const oldId = TRADERS[index].id;
-      
-      // Cap nhat ID moi
-      TRADERS[index].id = text;
-      
-      // Xoa du lieu da xu ly cua trader cu
-      processedOrders.delete(oldId);
-      
-      console.log('Updated TRADERS:', TRADERS);
-
-      await bot.sendMessage(chatId, 
-        `✅ Đã cập nhật thành công!\n\n` +
-        `Bot: ${TRADERS[index].name}\n` +
-        `ID cũ: ${oldId}\n` +
-        `ID mới: ${text}`
-      );
-
-      // Xoa trang thai chinh sua
-      delete editStates[chatId];
-      
-      // Gui trang thai hien tai
-      const status = TRADERS.map(t => `${t.name}: ${t.id}`).join('\n');
-      await bot.sendMessage(chatId, 
-        '📊 Trang thai hien tai:\n\n' + status
-      );
-
+      await bot.sendMessage(chatId, message, options);
+      // Đợi 1 giây trước khi gửi tin nhắn tiếp theo
+      await new Promise(resolve => setTimeout(resolve, this.retryDelay));
     } catch (error) {
-      console.error('Error updating trader ID:', error);
-      await bot.sendMessage(chatId, '❌ Có lỗi xảy ra khi cập nhật ID. Vui lòng thử lại.');
+      if (error.response && error.response.statusCode === 429) {
+        // Nếu bị rate limit, lấy thời gian chờ từ response
+        const retryAfter = error.response.body.parameters.retry_after || 30;
+        console.log(`Rate limited. Waiting ${retryAfter} seconds...`);
+        
+        // Đưa tin nhắn vào lại queue
+        this.queue.unshift({ chatId, message, options });
+        
+        // Đợi theo thời gian yêu cầu
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+      } else {
+        console.error('Error sending message:', error);
+      }
+    }
+
+    // Xử lý tin nhắn tiếp theo trong queue
+    this.process();
+  }
+}
+
+const messageQueue = new MessageQueue();
+
+// Cập nhật cấu hình bot với các tùy chọn SSL/TLS
+const botOptions = {
+  polling: {
+    interval: 1000, // Tăng interval lên 1 giây
+    autoStart: true,
+    params: {
+      timeout: 30 // Tăng timeout lên 30 giây
+    }
+  },
+  request: {
+    timeout: 60000, // Timeout cho requests
+    family: 4, // Chỉ sử dụng IPv4
+    forever: true, // Keep-alive connections
+    strictSSL: true, // Bắt buộc SSL
+    pool: { maxSockets: 10 } // Giới hạn số lượng kết nối
+  }
+};
+
+// Biến lưu thông tin bot
+let botInfo = null;
+
+// Khởi tạo bot và lưu thông tin
+const bot = new TelegramBot(config.TELEGRAM_BOT_TOKEN, botOptions);
+let db;
+
+// Cải thiện error handling
+let isReconnecting = false;
+
+bot.on('polling_error', async (error) => {
+  console.error('Polling error:', error);
+  
+  if (error.code === 'EFATAL' && !isReconnecting) {
+    isReconnecting = true;
+    console.log('Connection lost. Attempting to reconnect...');
+    
+    try {
+      await bot.stopPolling();
+      console.log('Polling stopped');
+      
+      // Tăng thời gian chờ trước khi thử lại
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      
+      await bot.startPolling();
+      console.log('Polling restarted successfully');
+      isReconnecting = false;
+    } catch (e) {
+      console.error('Failed to restart polling:', e);
+      isReconnecting = false;
+      
+      // Thử lại sau 30 giây nếu vẫn thất bại
+      setTimeout(() => {
+        bot.startPolling();
+      }, 30000);
     }
   }
 });
 
-async function fetchWithRetry(url, options, maxRetries = 3) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const response = await axios.get(url, options);
-      return response;
-    } catch (error) {
-      if (i === maxRetries - 1) throw error;
-      console.log(`Retry ${i + 1}/${maxRetries} after error:`, error.message);
-      await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
-    }
-  }
-}
+// Thêm error handler cho network errors
+bot.on('error', (error) => {
+  console.error('Bot error:', error);
+});
 
-async function fetchTraderPositions(traderId) {
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Thêm graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Shutting down bot...');
   try {
-    const timestamp = Date.now();
-    const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail?instType=SWAP&uniqueName=${traderId}&t=${timestamp}`;
-    
-    const response = await fetchWithRetry(url, { headers });
-    console.log(`Data from ${traderId}:`, response.data); // Thêm log để debug
-    return response.data.data;
+    await bot.stopPolling();
+    console.log('Bot stopped');
+    process.exit(0);
   } catch (error) {
-    console.error(`Error fetching data for trader ${traderId}:`, error.message);
-    if (error.response) {
-      console.error('Error response:', {
-        status: error.response.status,
-        headers: error.response.headers,
-        data: error.response.data
-      });
+    console.error('Error stopping bot:', error);
+    process.exit(1);
+  }
+});
+
+// Các hàm tiện ích
+async function loadTraders() {
+  try {
+    // Kiểm tra file có tồn tại không
+    try {
+      await fs.access(TRADERS_FILE);
+    } catch (e) {
+      // Nếu file không tồn tại, tạo file mới với dữ liệu mẫu
+      const defaultTraders = {
+        traders: [
+          {
+            id: "3C0A650E43C9F05F",
+            name: "Trader 1",
+            description: "Top Trader OKX"
+          }
+          // Thêm các trader mẫu khác nếu cần
+        ]
+      };
+      await fs.writeFile(TRADERS_FILE, JSON.stringify(defaultTraders, null, 2));
+      return defaultTraders.traders;
     }
+
+    // Đọc và parse dữ liệu
+    const data = await fs.readFile(TRADERS_FILE, 'utf8');
+    const parsed = JSON.parse(data);
+    
+    if (!parsed.traders || !Array.isArray(parsed.traders)) {
+      throw new Error('Invalid traders data format');
+    }
+    
+    return parsed.traders;
+  } catch (error) {
+    console.error('Error loading traders:', error);
     return [];
   }
 }
 
-function formatMessage(trader, position, isClose = false) {
-  const date = new Date(parseInt(position.openTime));
-  // Add 7 hours to convert to GMT+7
-  date.setHours(date.getHours() + 7);
-  const timestamp = date.toISOString().replace('T', ' ').slice(0, 19);
-  
-  if (isClose) {
-    return `
-❌ Đóng tín hiệu - ${trader.name}
-Cặp giao dịch: ${position.instId}
-Tín hiệu: ${position.posSide.toUpperCase()}
-Giá mở: ${parseFloat(position.openAvgPx).toFixed(4)}
-Thời gian mở: ${timestamp}
-`;
+async function saveTraders(traders) {
+  try {
+    await fs.writeFile(TRADERS_FILE, JSON.stringify({ traders }, null, 2));
+  } catch (error) {
+    console.error('Error saving traders:', error);
   }
-  return `
- ✅ Tín hiệu mới - ${trader.name}
-Cặp giao dịch: ${position.instId}
-Tín hiệu: ${position.posSide.toUpperCase()}
-Giá mở: ${parseFloat(position.openAvgPx).toFixed(4)}
-Thời gian mở: ${timestamp}
-`;
 }
 
+// Bot commands
+bot.onText(/\/traders/, async (msg) => {
+  const traders = await loadTraders();
+  const message = traders.map((t, i) => 
+    `${i + 1}. ${t.name}\nID: ${t.id}\n${t.description}\n`
+  ).join('\n');
+  
+  await bot.sendMessage(msg.chat.id, 
+    '📊 Danh sách Traders đang theo dõi:\n\n' + message
+  );
+});
+
+bot.onText(/\/changeid/, async (msg) => {
+  const traders = await loadTraders();
+  
+  const keyboard = {
+    inline_keyboard: traders.map((trader, index) => ([
+      {
+        text: `${trader.name} (${trader.id})`,
+        callback_data: `edit_${index}`
+      }
+    ]))
+  };
+
+  await bot.sendMessage(msg.chat.id,
+    '🔄 Chọn Trader cần thay đổi ID:',
+    { reply_markup: keyboard }
+  );
+});
+
+// Xử lý callbacks
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  
+  if (query.data.startsWith('edit_')) {
+    const index = parseInt(query.data.split('_')[1]);
+    const traders = await loadTraders();
+    const trader = traders[index];
+
+    editStates.set(chatId, { index, trader });
+
+    await bot.sendMessage(chatId,
+      `📝 Nhập ID mới cho ${trader.name}:\n` +
+      `ID hiện tại: ${trader.id}`,
+      { reply_markup: { force_reply: true } }
+    );
+  }
+});
+
+// Xử lý tin nhắn với kiểm tra an toàn
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  
+  // Đảm bảo có reply_to_message và botInfo
+  if (!msg.reply_to_message || !editStates.has(chatId)) return;
+
+  // Lấy thông tin bot nếu chưa có
+  if (!botInfo) {
+    try {
+      botInfo = await bot.getMe();
+    } catch (error) {
+      console.error('Error getting bot info:', error);
+      return;
+    }
+  }
+
+  // Kiểm tra xem tin nhắn có phải là reply cho bot không
+  if (msg.reply_to_message.from.id === botInfo.id) {
+    const newId = msg.text.trim();
+    const { index, trader } = editStates.get(chatId);
+
+    if (newId.length < 16) {
+      await bot.sendMessage(chatId, '❌ ID không hợp lệ. Vui lòng thử lại.');
+      return;
+    }
+
+    try {
+      const traders = await loadTraders();
+      const oldId = traders[index].id;
+      
+      traders[index].id = newId;
+      await saveTraders(traders);
+
+      await bot.sendMessage(chatId,
+        `✅ Đã cập nhật thành công!\n\n` +
+        `Trader: ${trader.name}\n` +
+        `ID cũ: ${oldId}\n` +
+        `ID mới: ${newId}`
+      );
+
+      editStates.delete(chatId);
+
+    } catch (error) {
+      console.error('Error updating trader:', error);
+      await bot.sendMessage(chatId, 
+        '❌ Có lỗi xảy ra khi cập nhật. Vui lòng thử lại.'
+      );
+    }
+  }
+});
+
+// Hàm chính để kiểm tra vị thế mới
 async function checkNewPositions() {
   try {
-    console.log('Checking new positions...');
-    for (const trader of TRADERS) {
+    const traders = await loadTraders();
+    
+    for (const trader of traders) {
       try {
-        const positions = await fetchTraderPositions(trader.id);
-        const currentPositions = new Map();
+        // Lấy vị thế từ API
+        const apiPositions = await fetchTraderPositions(trader.id);
         
-        if (positions && positions.length > 0) {
-          // Luu cac vi the hien tai vao map theo instId va posSide
-          positions.forEach(pos => {
-            const key = `${pos.instId}_${pos.posSide}`;
-            currentPositions.set(key, pos);
-          });
+        if (!apiPositions || apiPositions.length === 0) continue;
 
-          // Kiem tra lenh moi
-          positions.sort((a, b) => parseInt(b.openTime) - parseInt(a.openTime));
-          const latestPosition = positions[0];
-          const lastProcessedTime = processedOrders.get(trader.id);
+        // Lấy vị thế từ DB của trader này
+        const dbPositions = await getPositionsByTrader(trader.id);
 
-          if (!lastProcessedTime || parseInt(latestPosition.openTime) > lastProcessedTime) {
-            const message = formatMessage(trader, latestPosition);
-            try {
-              console.log(`Sending new position message for ${trader.name}:`, message);
-              await bot.sendMessage(TELEGRAM_GROUP_ID, message);
-              processedOrders.set(trader.id, parseInt(latestPosition.openTime));
-            } catch (error) {
-              console.error('Error sending new position message:', error.message);
-            }
+        // Kiểm tra từng vị thế từ API
+        for (const apiPosition of apiPositions) {
+          // Tạo signalId để so sánh
+          const signalId = `${apiPosition.instId}_${apiPosition.posSide}_${apiPosition.openTime}`;
+          
+          // Kiểm tra signalId đã tồn tại trong DB chưa
+          const existingSignal = dbPositions.find(pos => pos.signalId === signalId);
+
+          if (!existingSignal) {
+            console.log(`New position detected for ${trader.name}:`, {
+              signalId,
+              instId: apiPosition.instId,
+              posSide: apiPosition.posSide,
+              openTime: new Date(parseInt(apiPosition.openTime)),
+              openAvgPx: apiPosition.openAvgPx,
+              pos: apiPosition.pos,
+              lever: apiPosition.lever
+            });
+
+            // Lưu vào DB
+            const signal = {
+              signalId,
+              traderId: trader.id,
+              traderName: trader.name,
+              instId: apiPosition.instId,
+              posSide: apiPosition.posSide,
+              openAvgPx: apiPosition.openAvgPx,
+              openTime: new Date(parseInt(apiPosition.openTime)),
+              lever: apiPosition.lever,
+              pos: apiPosition.pos,
+              createdAt: new Date()
+            };
+
+            await saveSignal(signal);
+
+            // Format và gửi thông báo
+            const message = formatSignalMessage(trader, apiPosition);
+            await messageQueue.add(config.TELEGRAM_GROUP_ID, message, { parse_mode: 'HTML' });
+          } else {
+            // Log để debug - có thể comment out sau
+            console.log(`Existing position found for ${trader.name}:`, signalId);
           }
         }
-
-        // Kiem tra lenh dong
-        const previousPositions = activePositions.get(trader.id) || new Map();
-        
-        // Tim cac lenh da dong (co trong previous nhưng khong co trong current)
-        for (const [key, position] of previousPositions.entries()) {
-          if (!currentPositions.has(key)) {
-            // Lenh da dong
-            const closeMessage = formatMessage(trader, position, true);
-            try {
-              console.log(`Sending close position message for ${trader.name}:`, closeMessage);
-              await bot.sendMessage(TELEGRAM_GROUP_ID, closeMessage);
-            } catch (error) {
-              console.error('Error sending close position message:', error.message);
-            }
-          }
-        }
-
-        // Cap nhat danh sach lenh dang mo
-        activePositions.set(trader.id, currentPositions);
-        
       } catch (error) {
-        await handleError(error, `Processing positions for ${trader.name}`);
+        console.error(`Error checking positions for trader ${trader.name}:`, error);
       }
     }
   } catch (error) {
-    await handleError(error, 'checkNewPositions');
+    console.error('Error in checkNewPositions:', error);
   }
 }
 
-// Khoi dong bot
-async function startBot() {
-  console.log('Bot started...');
-  // Chay ngay lap tuc mot lan
-  await checkNewPositions();
-  // Sau do moi bat dau interval
-  setInterval(checkNewPositions, INTERVAL);
+// Format thông báo chi tiết hơn
+function formatSignalMessage(trader, position) {
+  const side = position.posSide === 'long' ? '🟢 LONG' : '🔴 SHORT';
+  const time = new Date(parseInt(position.openTime)).toLocaleString('vi-VN');
+  
+  return `
+🔔 Tín Hiệu Mới!
+
+👤 Trader: ${trader.name}
+${side} ${position.instId}
+💰 Giá Mở: ${position.openAvgPx}
+⏰ Thời Gian: ${time}
+📊 Đòn Bẩy: ${position.lever}x
+🔢 Số Lượng: ${position.pos}
+
+🆔 Signal ID: ${position.instId}_${position.posSide}_${position.openTime}
+`;
 }
 
-// Them xu ly loi chung
-process.on('unhandledRejection', async (error) => {
-  await handleError(error, 'Unhandled Promise Rejection');
-});
-
-process.on('uncaughtException', async (error) => {
-  await handleError(error, 'Uncaught Exception');
-});
-
-// Xử lý tắt bot an toàn
-process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM signal');
-  await gracefulShutdown();
-});
-
-process.on('SIGINT', async () => {
-  console.log('Received SIGINT signal');
-  await gracefulShutdown();
-});
-
-async function gracefulShutdown() {
+// Khởi động bot
+async function initBot() {
   try {
-    isShuttingDown = true;
-    console.log('Starting graceful shutdown...');
+    await connectDB();
     
-    // Gửi thông báo đang tắt bot
-    await bot.sendMessage(TELEGRAM_GROUP_ID, '🔄 Bot đang được khởi động lại...');
+    // Kiểm tra tín hiệu mới mỗi 10 giây
+    setInterval(checkNewPositions, 10000);
     
-    // Dừng polling
-    bot.stopPolling();
-    
-    console.log('Bot stopped polling');
-    process.exit(0);
+    console.log('Bot started successfully');
   } catch (error) {
-    console.error('Error during shutdown:', error);
+    console.error('Error initializing bot:', error);
     process.exit(1);
   }
 }
 
-// Them lenh test
-bot.onText(/\/test/, async (msg) => {
-  try {
-    await bot.sendMessage(TELEGRAM_GROUP_ID, 'Test message');
-    console.log('Test message sent successfully');
-  } catch (error) {
-    console.error('Error sending test message:', error);
-  }
-});
-
-// Them lenh de kiem tra trang thai
-bot.onText(/\/status/, async (msg) => {
-  const status = TRADERS.map(t => `${t.name}: ${t.id}`).join('\n');
-  await bot.sendMessage(msg.chat.id, 
-    '📊 Trang thai hien tai:\n\n' + status
-  );
-});
-
-// Them doan nay vao dau file sau khi khoi tao bot
-bot.getMe().then((me) => {
-  bot.me = me;
-  console.log('Bot info:', me);
-});
-
-startBot(); 
+// Khởi chạy bot
+initBot();
