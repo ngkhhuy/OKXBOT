@@ -1,17 +1,17 @@
 {
   "traders": [
     {
-      "id": "15D169B3F29FAC0D",
+      "id": "DACD5255F219FAB6",
       "name": "Bot 1",
       "description": "VIP 1" 
     },
     {
-      "id": "463BA910FF140657",
+      "id": "9AFF66741B70CFFF",
       "name": "Bot 2",
       "description": "VIP 2"
     },
     {
-      "id": "DFA6C37244041057",
+      "id": "2A937DDE808AF40D",
       "name": "Bot 3",
       "description": "VIP 3"
     }

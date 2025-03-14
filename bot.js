@@ -204,7 +204,7 @@ async function saveTraders(traders) {
 }
 
 // Bot commands
-bot.onText(/\/traders/, async (msg) => {
+bot.onText(/\/bots/, async (msg) => {
   const traders = await loadTraders();
   const message = traders.map((t, i) => 
     `${i + 1}. ${t.name}\nID: ${t.id}\n${t.description}\n`
