@@ -315,53 +315,59 @@ async function checkNewPositions() {
         // Lấy vị thế từ API
         const apiPositions = await api.fetchTraderPositions(trader.id);
         
-        if (!apiPositions || apiPositions.length === 0) continue;
-
         // Lấy vị thế từ DB của trader này
         const dbPositions = await getPositionsByTrader(trader.id);
 
-        // Kiểm tra từng vị thế từ API
-        for (const apiPosition of apiPositions) {
-          const signalId = `${apiPosition.instId}_${apiPosition.posSide}_${apiPosition.openTime}`;
-          
-          // Kiểm tra signalId đã tồn tại trong DB chưa
-          const existingSignal = dbPositions.find(pos => pos.signalId === signalId);
+        // Kiểm tra các vị thế mới từ API
+        if (apiPositions && apiPositions.length > 0) {
+          for (const apiPosition of apiPositions) {
+            const signalId = `${apiPosition.instId}_${apiPosition.posSide}_${apiPosition.openTime}`;
+            const existingSignal = dbPositions.find(pos => pos.signalId === signalId);
 
-          if (!existingSignal) {
-            console.log(`New position detected for ${trader.name}:`, {
-              signalId,
-              instId: apiPosition.instId,
-              posSide: apiPosition.posSide,
-              openTime: new Date(parseInt(apiPosition.openTime)),
-              openAvgPx: apiPosition.openAvgPx,
-              pos: apiPosition.pos,
-              lever: apiPosition.lever
-            });
+            if (!existingSignal) {
+              // Xử lý vị thế mới như cũ
+              console.log(`New position detected for ${trader.name}:`, {
+                signalId,
+                instId: apiPosition.instId,
+                posSide: apiPosition.posSide,
+                openTime: new Date(parseInt(apiPosition.openTime))
+              });
 
-            // Lưu vào DB
-            const signal = {
-              signalId,
-              traderId: trader.id,
-              traderName: trader.name,
-              instId: apiPosition.instId,
-              posSide: apiPosition.posSide,
-              openAvgPx: apiPosition.openAvgPx,
-              openTime: new Date(parseInt(apiPosition.openTime)),
-              lever: apiPosition.lever,
-              pos: apiPosition.pos,
-              createdAt: new Date()
-            };
+              const signal = {
+                signalId,
+                traderId: trader.id,
+                traderName: trader.name,
+                instId: apiPosition.instId,
+                posSide: apiPosition.posSide,
+                openAvgPx: apiPosition.openAvgPx,
+                openTime: new Date(parseInt(apiPosition.openTime)),
+                lever: apiPosition.lever,
+                pos: apiPosition.pos,
+                createdAt: new Date()
+              };
 
-            await saveSignal(signal);
-
-            // Format và gửi thông báo
-            const message = formatSignalMessage(trader, apiPosition);
-            await messageQueue.add(config.TELEGRAM_GROUP_ID, message, { parse_mode: 'HTML' });
-          } else {
-            // Log để debug - có thể comment out sau
-            console.log(`Existing position found for ${trader.name}:`, signalId);
+              await saveSignal(signal);
+              const message = formatSignalMessage(trader, apiPosition);
+              await messageQueue.add(config.TELEGRAM_GROUP_ID, message, { parse_mode: 'HTML' });
+            }
           }
         }
+
+        // Kiểm tra các vị thế đã đóng
+        for (const dbPosition of dbPositions) {
+          const isStillOpen = apiPositions?.some(apiPos => 
+            `${apiPos.instId}_${apiPos.posSide}_${apiPos.openTime}` === dbPosition.signalId
+          );
+
+          if (!isStillOpen) {
+            console.log(`Closed position detected for ${trader.name}:`, dbPosition.signalId);
+            
+            // Format thông báo đóng lệnh
+            const closeMessage = formatClosePositionMessage(trader, dbPosition);
+            await messageQueue.add(config.TELEGRAM_GROUP_ID, closeMessage, { parse_mode: 'HTML' });
+          }
+        }
+
       } catch (error) {
         console.error(`Error checking positions for trader ${trader.name}:`, error);
       }
@@ -383,6 +389,21 @@ function formatSignalMessage(trader, position) {
 ${side} ${position.instId}
 💰 Giá Mở: ${position.openAvgPx}
 ⏰ Thời Gian: ${time}
+`;
+}
+
+// Hàm format thông báo đóng lệnh
+function formatClosePositionMessage(trader, position) {
+  const side = position.posSide === 'long' ? '🟢 LONG' : '🔴 SHORT';
+  const time = position.openTime.toLocaleString('vi-VN');
+  
+  return `
+🔔 <b>ĐÓNG LỆNH</b>
+
+👤 Bot: ${trader.name}
+${side} ${position.instId}
+💰 Giá Mở: ${position.openAvgPx}
+⏰ Thời Gian Mở: ${time}
 `;
 }
 
