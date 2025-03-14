@@ -2,6 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
+const axios = require('axios');
 const { connectDB, checkSignalExists, saveSignal, getPositionsByTrader } = require('./db');
 const api = require('./api');
 const config = require('./config');
@@ -393,6 +394,19 @@ setInterval(async () => {
   const randomDelay = Math.floor(Math.random() * 5000);
   setTimeout(checkNewPositions, randomDelay);
 }, INTERVAL);
+
+// Hàm ping website
+async function pingWebsite() {
+  try {
+    const response = await axios.get('https://okxbot-df6s.onrender.com/');
+    console.log('Ping successful:', response.status);
+  } catch (error) {
+    console.error('Ping failed:', error.message);
+  }
+}
+
+// Chạy ping mỗi 10 giây
+setInterval(pingWebsite, 9000);
 
 // Khởi động bot
 async function initBot() {
