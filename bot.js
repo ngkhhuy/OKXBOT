@@ -211,7 +211,7 @@ bot.onText(/\/traders/, async (msg) => {
   ).join('\n');
   
   await bot.sendMessage(msg.chat.id, 
-    '📊 Danh sách Traders đang theo dõi:\n\n' + message
+    '📊 Danh sách Bot đang chạy:\n\n' + message
   );
 });
 
@@ -228,7 +228,7 @@ bot.onText(/\/changeid/, async (msg) => {
   };
 
   await bot.sendMessage(msg.chat.id,
-    '🔄 Chọn Trader cần thay đổi ID:',
+    '🔄 Chọn Bot cần thay đổi ID:',
     { reply_markup: keyboard }
   );
 });
@@ -288,7 +288,7 @@ bot.on('message', async (msg) => {
 
       await bot.sendMessage(chatId,
         `✅ Đã cập nhật thành công!\n\n` +
-        `Trader: ${trader.name}\n` +
+        `Bot: ${trader.name}\n` +
         `ID cũ: ${oldId}\n` +
         `ID mới: ${newId}`
       );
@@ -378,12 +378,11 @@ function formatSignalMessage(trader, position) {
   return `
 🔔 Tín Hiệu Mới!
 
-👤 Trader: ${trader.name}
+👤 Bot: ${trader.name}
 ${side} ${position.instId}
 💰 Giá Mở: ${position.openAvgPx}
 ⏰ Thời Gian: ${time}
-📊 Đòn Bẩy: ${position.lever}x
-🔢 Số Lượng: ${position.pos}
+
 
 🆔 Signal ID: ${position.instId}_${position.posSide}_${position.openTime}
 `;
