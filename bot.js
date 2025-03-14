@@ -1,12 +1,32 @@
 const TelegramBot = require('node-telegram-bot-api');
+const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const { connectDB, checkSignalExists, saveSignal, getPositionsByTrader } = require('./db');
-const { fetchTraderPositions } = require('./api');
+const api = require('./api');
 const config = require('./config');
 
 const TRADERS_FILE = path.join(__dirname, 'traders.json');
 const editStates = new Map();
+
+// Khởi tạo Express app
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Basic route để kiểm tra server đang chạy
+app.get('/', (req, res) => {
+  res.send('Bot is running!');
+});
+
+// Health check route
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK' });
+});
+
+// Khởi động Express server
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
 
 // Thêm rate limit handling
 class MessageQueue {
@@ -292,7 +312,7 @@ async function checkNewPositions() {
     for (const trader of traders) {
       try {
         // Lấy vị thế từ API
-        const apiPositions = await fetchTraderPositions(trader.id);
+        const apiPositions = await api.fetchTraderPositions(trader.id);
         
         if (!apiPositions || apiPositions.length === 0) continue;
 
@@ -301,7 +321,6 @@ async function checkNewPositions() {
 
         // Kiểm tra từng vị thế từ API
         for (const apiPosition of apiPositions) {
-          // Tạo signalId để so sánh
           const signalId = `${apiPosition.instId}_${apiPosition.posSide}_${apiPosition.openTime}`;
           
           // Kiểm tra signalId đã tồn tại trong DB chưa
@@ -376,9 +395,11 @@ async function initBot() {
     await connectDB();
     
     // Kiểm tra tín hiệu mới mỗi 10 giây
-    setInterval(checkNewPositions, 10000);
+    setInterval(checkNewPositions, config.INTERVAL);
     
-    console.log('Bot started successfully');
+    console.log(`Bot started successfully`);
+    
+    return bot;
   } catch (error) {
     console.error('Error initializing bot:', error);
     process.exit(1);

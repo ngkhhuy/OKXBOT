@@ -76,7 +76,7 @@ async function saveSignal(signal) {
       traderName: signal.traderName,
       instId: signal.instId,
       posSide: signal.posSide,
-      openPrice: signal.openAvgPx,
+      openAvgPx: signal.openAvgPx,
       openTime: signal.openTime,
       leverage: signal.lever,
       size: signal.pos,
