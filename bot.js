@@ -382,9 +382,6 @@ function formatSignalMessage(trader, position) {
 ${side} ${position.instId}
 💰 Giá Mở: ${position.openAvgPx}
 ⏰ Thời Gian: ${time}
-
-
-🆔 Signal ID: ${position.instId}_${position.posSide}_${position.openTime}
 `;
 }
 
