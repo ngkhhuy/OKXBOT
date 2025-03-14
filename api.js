@@ -1,16 +1,17 @@
 const axios = require('axios');
-const crypto = require('crypto');
+const rateLimit = require('axios-rate-limit');
 
 class API {
   constructor() {
     // Danh sách User-Agents để rotate
     this.userAgents = [
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1'
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.2 Safari/605.1.15',
+      'Mozilla/5.0 (iPad; CPU OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1'
     ];
 
+    this.languages = ['en-US', 'en-GB', 'zh-CN', 'ja-JP', 'ko-KR'];
     this.retryDelays = [2000, 5000, 10000]; // Tăng thời gian delay
 
     // Bind các methods với instance
@@ -20,7 +21,9 @@ class API {
 
   // Tạo random fingerprint
   generateFingerprint() {
-    return crypto.randomBytes(16).toString('hex');
+    const timestamp = Date.now().toString();
+    const random = Math.random().toString(36).substring(7);
+    return timestamp + random;
   }
 
   // Lấy random User-Agent
@@ -28,32 +31,45 @@ class API {
     return this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
   }
 
+  getRandomLanguage() {
+    return this.languages[Math.floor(Math.random() * this.languages.length)];
+  }
+
   // Tạo axios instance mới cho mỗi request
   createAxiosInstance() {
     const fingerprint = this.generateFingerprint();
-    
-    return axios.create({
-      headers: {
-        'User-Agent': this.getRandomUserAgent(),
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Origin': 'https://www.okx.com',
-        'Referer': 'https://www.okx.com/',
-        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'x-cdn': 'https://www.okx.com',
-        'x-utc': '7',
-        'x-cdn-id': fingerprint,
-        'x-trace-id': fingerprint,
-        'Connection': 'keep-alive'
-      },
-      timeout: 10000
+    const instance = rateLimit(axios.create(), { 
+      maxRequests: 2,
+      perMilliseconds: 1000
     });
+
+    instance.defaults.headers.common = {
+      'User-Agent': this.getRandomUserAgent(),
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': `${this.getRandomLanguage()},en;q=0.9`,
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Origin': 'https://www.okx.com',
+      'Referer': 'https://www.okx.com/',
+      'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+      'x-cdn': 'https://www.okx.com',
+      'x-utc': '7',
+      'x-cdn-id': fingerprint,
+      'x-trace-id': fingerprint,
+      'Connection': 'keep-alive',
+      'Cookie': this.generateRandomCookie()
+    };
+
+    return instance;
+  }
+
+  generateRandomCookie() {
+    const cookieId = Math.random().toString(36).substring(7);
+    return `session=${cookieId}; locale=en_US`;
   }
 
   async fetchTraderPositions(traderId) {
@@ -62,6 +78,10 @@ class API {
 
     while (attempts < maxAttempts) {
       try {
+        // Thêm delay ngẫu nhiên trước mỗi request
+        const randomDelay = Math.floor(Math.random() * 2000) + 1000;
+        await new Promise(resolve => setTimeout(resolve, randomDelay));
+
         const http = this.createAxiosInstance();
         const timestamp = Date.now();
         const url = `https://www.okx.com/priapi/v5/ecotrade/public/trader/position-detail`;
@@ -75,13 +95,10 @@ class API {
         });
         
         if (response.data && response.data.data) {
-          // Thêm delay ngẫu nhiên trước khi trả về kết quả
-          const randomDelay = Math.floor(Math.random() * 1000) + 500;
-          await new Promise(resolve => setTimeout(resolve, randomDelay));
-          
           return response.data.data;
         }
         return [];
+
       } catch (error) {
         attempts++;
         console.error(`Attempt ${attempts} failed for trader ${traderId}:`, error.message);
@@ -90,7 +107,6 @@ class API {
           throw error;
         }
         
-        // Đợi theo thời gian retry với thêm random delay
         const delay = this.retryDelays[attempts - 1] + Math.floor(Math.random() * 2000);
         await new Promise(resolve => setTimeout(resolve, delay));
       }

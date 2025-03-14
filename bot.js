@@ -388,6 +388,15 @@ ${side} ${position.instId}
 `;
 }
 
+// Tăng interval lên 10-15 giây
+const INTERVAL = 7000;
+
+// Thêm random delay
+setInterval(async () => {
+  const randomDelay = Math.floor(Math.random() * 5000);
+  setTimeout(checkNewPositions, randomDelay);
+}, INTERVAL);
+
 // Khởi động bot
 async function initBot() {
   try {

@@ -2,17 +2,17 @@
   "traders": [
     {
       "id": "15D169B3F29FAC0D",
-      "name": "Trader 1",
+      "name": "Bot 1",
       "description": "VIP 1" 
     },
     {
       "id": "463BA910FF140657",
-      "name": "Trader 2",
+      "name": "Bot 2",
       "description": "VIP 2"
     },
     {
       "id": "DFA6C37244041057",
-      "name": "Trader 3",
+      "name": "Bot 3",
       "description": "VIP 3"
     }
   ]
