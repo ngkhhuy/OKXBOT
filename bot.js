@@ -398,7 +398,7 @@ setInterval(async () => {
 // Hàm ping website
 async function pingWebsite() {
   try {
-    const response = await axios.get('https://okxbot-df6s.onrender.com/');
+    const response = await axios.get('https://okxbot-ms4c.onrender.com');
     console.log('Ping successful:', response.status);
   } catch (error) {
     console.error('Ping failed:', error.message);
