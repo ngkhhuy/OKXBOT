@@ -380,22 +380,30 @@ async function checkNewPositions() {
 // Format thông báo chi tiết hơn
 function formatSignalMessage(trader, position) {
   const side = position.posSide === 'long' ? '🟢 LONG' : '🔴 SHORT';
-  const time = new Date(parseInt(position.openTime)).toLocaleString('vi-VN');
   
+  // Lấy thời gian hiện tại
+  const currentTime = new Date().toLocaleString('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh'
+  });
+
   return `
 🔔 Tín Hiệu Mới!
 
 👤 Bot: ${trader.name}
 ${side} ${position.instId}
 💰 Giá Mở: ${position.openAvgPx}
-⏰ Thời Gian: ${time}
+⏰ Thời Gian: ${currentTime}
 `;
 }
 
 // Hàm format thông báo đóng lệnh
 function formatClosePositionMessage(trader, position) {
   const side = position.posSide === 'long' ? '🟢 LONG' : '🔴 SHORT';
-  const time = position.openTime.toLocaleString('vi-VN');
+  
+  // Lấy thời gian hiện tại
+  const currentTime = new Date().toLocaleString('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh'
+  });
   
   return `
 🔔 <b>ĐÓNG LỆNH</b>
@@ -403,7 +411,7 @@ function formatClosePositionMessage(trader, position) {
 👤 Bot: ${trader.name}
 ${side} ${position.instId}
 💰 Giá Mở: ${position.openAvgPx}
-⏰ Thời Gian Mở: ${time}
+⏰ Thời Gian: ${currentTime}
 `;
 }
 
