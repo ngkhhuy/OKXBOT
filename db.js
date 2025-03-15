@@ -91,11 +91,23 @@ async function saveSignal(signal) {
   }
 }
 
+async function deleteSignal(signalId) {
+  try {
+    const collection = db.collection('signals');
+    await collection.deleteOne({ signalId: signalId });
+    return true;
+  } catch (error) {
+    console.error('Error deleting signal:', error);
+    return false;
+  }
+}
+
 module.exports = {
   connectDB,
   savePosition,
   getPositionsByTrader,
   positionExists,
   checkSignalExists,
-  saveSignal
+  saveSignal,
+  deleteSignal
 }; 

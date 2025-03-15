@@ -3,7 +3,7 @@ const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
-const { connectDB, checkSignalExists, saveSignal, getPositionsByTrader } = require('./db');
+const { connectDB, checkSignalExists, saveSignal, getPositionsByTrader, deleteSignal } = require('./db');
 const api = require('./api');
 const config = require('./config');
 
@@ -362,9 +362,13 @@ async function checkNewPositions() {
           if (!isStillOpen) {
             console.log(`Closed position detected for ${trader.name}:`, dbPosition.signalId);
             
-            // Format thông báo đóng lệnh
+            // Format và gửi thông báo đóng lệnh
             const closeMessage = formatClosePositionMessage(trader, dbPosition);
             await messageQueue.add(config.TELEGRAM_GROUP_ID, closeMessage, { parse_mode: 'HTML' });
+
+            // Xóa signal đã đóng khỏi database
+            await deleteSignal(dbPosition.signalId);
+            console.log(`Deleted closed signal: ${dbPosition.signalId}`);
           }
         }
 
