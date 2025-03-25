@@ -38,6 +38,11 @@ class MessageQueue {
   }
 
   async add(chatId, message, options = {}) {
+    // Thêm message_thread_id nếu có TOPIC_ID được cấu hình
+    if (config.TOPIC_ID) {
+      options.message_thread_id = config.TOPIC_ID;
+    }
+    
     this.queue.push({ chatId, message, options });
     if (!this.isProcessing) {
       this.process();
@@ -460,3 +465,86 @@ async function initBot() {
 
 // Khởi chạy bot
 initBot();
+
+// Command để set topic ID
+bot.onText(/\/setTopicId/, async (msg) => {
+  try {
+    // Kiểm tra xem tin nhắn có message_thread_id không
+    if (!msg.message_thread_id) {
+      await bot.sendMessage(msg.chat.id, '❌ Vui lòng sử dụng lệnh này trong một Topic!', {
+        message_thread_id: msg.message_thread_id
+      });
+      return;
+    }
+
+    // Lưu topic ID vào config
+    config.TOPIC_ID = msg.message_thread_id;
+
+    await bot.sendMessage(
+      msg.chat.id, 
+      `✅ Đã set Topic ID thành công!\nTất cả thông báo sẽ được gửi tới Topic này.`,
+      {
+        message_thread_id: msg.message_thread_id
+      }
+    );
+
+  } catch (error) {
+    console.error('Error setting topic ID:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi set Topic ID.', {
+      message_thread_id: msg.message_thread_id
+    });
+  }
+});
+
+// Command để thay đổi Group ID
+bot.onText(/\/changeGroupId/, async (msg) => {
+  try {
+    // Gửi tin nhắn yêu cầu nhập Group ID mới
+    const response = await bot.sendMessage(
+      msg.chat.id,
+      '📝 Vui lòng nhập Group ID mới:',
+      { reply_markup: { force_reply: true } }
+    );
+
+    // Lưu message_id để kiểm tra reply sau này
+    const messageId = response.message_id;
+
+    // Handler cho reply
+    const replyHandler = async (replyMsg) => {
+      // Kiểm tra xem có phải reply cho tin nhắn yêu cầu không
+      if (replyMsg.reply_to_message && replyMsg.reply_to_message.message_id === messageId) {
+        const newGroupId = replyMsg.text.trim();
+
+        // Validate Group ID
+        if (!newGroupId.startsWith('-') || isNaN(newGroupId.substring(1))) {
+          await bot.sendMessage(msg.chat.id, '❌ Group ID không hợp lệ. Vui lòng thử lại.');
+          return;
+        }
+
+        try {
+          // Lưu Group ID mới vào config
+          const oldGroupId = config.TELEGRAM_GROUP_ID;
+          config.TELEGRAM_GROUP_ID = newGroupId;
+
+          await bot.sendMessage(
+            msg.chat.id,
+            `✅ Đã cập nhật Group ID thành công!\n\nGroup ID cũ: ${oldGroupId}\nGroup ID mới: ${newGroupId}`
+          );
+
+          // Xóa handler sau khi hoàn thành
+          bot.removeListener('message', replyHandler);
+        } catch (error) {
+          console.error('Error updating Group ID:', error);
+          await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi cập nhật Group ID.');
+        }
+      }
+    };
+
+    // Thêm handler cho reply
+    bot.on('message', replyHandler);
+
+  } catch (error) {
+    console.error('Error in changeGroupId command:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra. Vui lòng thử lại sau.');
+  }
+});
