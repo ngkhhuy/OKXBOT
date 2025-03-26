@@ -317,6 +317,15 @@ bot.on('message', async (msg) => {
       );
     }
   }
+
+  // Thêm log cho tất cả tin nhắn nhận được
+  console.log('Received message:', {
+    chatId: chatId,
+    messageId: msg.message_id,
+    text: msg.text,
+    from: msg.from.username || msg.from.first_name,
+    threadId: msg.message_thread_id
+  });
 });
 
 // Hàm chính để kiểm tra vị thế mới
@@ -363,8 +372,8 @@ async function checkNewPositions() {
               await saveSignal(signal);
               const message = formatSignalMessage(trader, apiPosition);
               
-              
-              await messageQueue.add('-1002071355788', message, { parse_mode: 'HTML' });
+              // Sử dụng config.TELEGRAM_GROUP_ID thay vì hardcode
+              await messageQueue.add(config.TELEGRAM_GROUP_ID, message, { parse_mode: 'HTML' });
             }
           }
         }
@@ -381,8 +390,8 @@ async function checkNewPositions() {
             // Format và gửi thông báo đóng lệnh
             const closeMessage = formatClosePositionMessage(trader, dbPosition);
             
-           
-              await messageQueue.add('-1002071355788', closeMessage, { parse_mode: 'HTML' });
+            // Sử dụng config.TELEGRAM_GROUP_ID thay vì hardcode
+            await messageQueue.add(config.TELEGRAM_GROUP_ID, closeMessage, { parse_mode: 'HTML' });
 
             // Xóa signal đã đóng khỏi database
             await deleteSignal(dbPosition.signalId);
@@ -488,8 +497,9 @@ bot.onText(/\/setTopicId/, async (msg) => {
       return;
     }
 
-    // Lưu topic ID vào config
+    // Lưu topic ID và group ID vào config
     config.TOPIC_ID = msg.message_thread_id;
+    config.TELEGRAM_GROUP_ID = msg.chat.id.toString();
     
     // Gửi tin nhắn xác nhận
     await bot.sendMessage(
@@ -595,5 +605,21 @@ bot.onText(/\/checkconfig/, async (msg) => {
   } catch (error) {
     console.error('Error checking config:', error);
     await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi kiểm tra cấu hình.');
+  }
+});
+
+// Thêm lệnh đơn giản để kiểm tra bot
+bot.onText(/\/ping/, async (msg) => {
+  try {
+    await bot.sendMessage(msg.chat.id, 'Pong! Bot đang hoạt động.', {
+      message_thread_id: msg.message_thread_id
+    });
+    
+    console.log('Ping command received from:', {
+      chatId: msg.chat.id,
+      username: msg.from.username || msg.from.first_name
+    });
+  } catch (error) {
+    console.error('Error responding to ping:', error);
   }
 });
