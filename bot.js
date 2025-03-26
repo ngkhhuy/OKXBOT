@@ -363,7 +363,7 @@ async function checkNewPositions() {
               await saveSignal(signal);
               const message = formatSignalMessage(trader, apiPosition);
               
-              // Sửa lỗi: Sử dụng -1002582955918 thay vì -2582955918
+              
               await messageQueue.add('-1002071355788', message, { parse_mode: 'HTML' });
             }
           }
@@ -381,7 +381,7 @@ async function checkNewPositions() {
             // Format và gửi thông báo đóng lệnh
             const closeMessage = formatClosePositionMessage(trader, dbPosition);
             
-            // Sửa lỗi: Sử dụng -1002582955918 thay vì -2582955918
+           
               await messageQueue.add('-1002071355788', closeMessage, { parse_mode: 'HTML' });
 
             // Xóa signal đã đóng khỏi database
