@@ -34,15 +34,21 @@ class MessageQueue {
   constructor() {
     this.queue = [];
     this.isProcessing = false;
-    this.retryDelay = 1000; // 1 giây giữa các tin nhắn
+    this.retryDelay = 1000;
   }
 
   async add(chatId, message, options = {}) {
-    // Thêm message_thread_id nếu có TOPIC_ID được cấu hình
+    // Sử dụng chatId được truyền vào (không dùng config.TELEGRAM_GROUP_ID)
     if (config.TOPIC_ID) {
       options.message_thread_id = config.TOPIC_ID;
     }
     
+    console.log('Queuing message with:', {
+      chatId,
+      topicId: config.TOPIC_ID,
+      options
+    });
+
     this.queue.push({ chatId, message, options });
     if (!this.isProcessing) {
       this.process();
@@ -59,26 +65,29 @@ class MessageQueue {
     const { chatId, message, options } = this.queue.shift();
 
     try {
+      console.log('Sending message to:', {
+        chatId,
+        messageThreadId: options.message_thread_id,
+        messageLength: message.length
+      });
+
       await bot.sendMessage(chatId, message, options);
-      // Đợi 1 giây trước khi gửi tin nhắn tiếp theo
       await new Promise(resolve => setTimeout(resolve, this.retryDelay));
     } catch (error) {
+      console.error('Error sending message:', {
+        error: error.message,
+        chatId,
+        options
+      });
+
       if (error.response && error.response.statusCode === 429) {
-        // Nếu bị rate limit, lấy thời gian chờ từ response
         const retryAfter = error.response.body.parameters.retry_after || 30;
         console.log(`Rate limited. Waiting ${retryAfter} seconds...`);
-        
-        // Đưa tin nhắn vào lại queue
         this.queue.unshift({ chatId, message, options });
-        
-        // Đợi theo thời gian yêu cầu
         await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-      } else {
-        console.error('Error sending message:', error);
       }
     }
 
-    // Xử lý tin nhắn tiếp theo trong queue
     this.process();
   }
 }
@@ -353,7 +362,9 @@ async function checkNewPositions() {
 
               await saveSignal(signal);
               const message = formatSignalMessage(trader, apiPosition);
-              await messageQueue.add(config.TELEGRAM_GROUP_ID, message, { parse_mode: 'HTML' });
+              
+              // Sửa lỗi: Sử dụng -1002582955918 thay vì -2582955918
+              await messageQueue.add('-1002582955918', message, { parse_mode: 'HTML' });
             }
           }
         }
@@ -369,7 +380,9 @@ async function checkNewPositions() {
             
             // Format và gửi thông báo đóng lệnh
             const closeMessage = formatClosePositionMessage(trader, dbPosition);
-            await messageQueue.add(config.TELEGRAM_GROUP_ID, closeMessage, { parse_mode: 'HTML' });
+            
+            // Sửa lỗi: Sử dụng -1002582955918 thay vì -2582955918
+            await messageQueue.add('-1002582955918', closeMessage, { parse_mode: 'HTML' });
 
             // Xóa signal đã đóng khỏi database
             await deleteSignal(dbPosition.signalId);
@@ -471,80 +484,116 @@ bot.onText(/\/setTopicId/, async (msg) => {
   try {
     // Kiểm tra xem tin nhắn có message_thread_id không
     if (!msg.message_thread_id) {
-      await bot.sendMessage(msg.chat.id, '❌ Vui lòng sử dụng lệnh này trong một Topic!', {
-        message_thread_id: msg.message_thread_id
-      });
+      await bot.sendMessage(msg.chat.id, '❌ Vui lòng sử dụng lệnh này trong một Topic!');
       return;
     }
 
     // Lưu topic ID vào config
     config.TOPIC_ID = msg.message_thread_id;
-
+    
+    // Gửi tin nhắn xác nhận
     await bot.sendMessage(
       msg.chat.id, 
-      `✅ Đã set Topic ID thành công!\nTất cả thông báo sẽ được gửi tới Topic này.`,
+      `✅ Đã set Topic ID thành công!\n\nGroup ID: ${msg.chat.id}\nTopic ID: ${msg.message_thread_id}`,
       {
         message_thread_id: msg.message_thread_id
       }
     );
 
+    console.log('Configuration updated:', {
+      chatId: msg.chat.id,
+      topicId: msg.message_thread_id
+    });
+
   } catch (error) {
     console.error('Error setting topic ID:', error);
-    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi set Topic ID.', {
+    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi set Topic ID.');
+  }
+});
+
+// Thêm command để test gửi tin nhắn
+bot.onText(/\/test/, async (msg) => {
+  try {
+    const testMessage = `
+🔔 Tin nhắn test
+
+⏰ Thời gian: ${new Date().toLocaleString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh'
+    })}
+`;
+
+    await messageQueue.add(msg.chat.id, testMessage, {
+      parse_mode: 'HTML'
+    });
+
+  } catch (error) {
+    console.error('Error in test command:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi gửi tin nhắn test.');
+  }
+});
+
+// Command để hiển thị trợ giúp
+bot.onText(/\/gethelp/, async (msg) => {
+  try {
+    const helpMessage = `
+🤖 *Danh sách các lệnh:*
+
+📋 *Quản lý Bot*
+• */bots* - Xem danh sách các bot đang chạy
+• */changeid* - Thay đổi ID của bot
+  - Chọn bot cần thay đổi ID
+  - Nhập ID mới cho bot
+
+🔧 *Cài đặt Hệ thống*
+• */setTopicId* - Set topic để nhận thông báo
+  - Sử dụng trong topic muốn nhận thông báo
+  - Bot sẽ gửi tất cả thông báo vào topic này
+
+• */checkconfig* - Kiểm tra cấu hình hiện tại
+  - Xem Group ID và Topic ID đang được set
+
+• */test* - Gửi tin nhắn test
+  - Kiểm tra việc gửi tin nhắn vào topic
+
+ℹ️ *Trợ giúp*
+• */gethelp* - Hiển thị danh sách lệnh này
+
+💡 *Lưu ý:*
+• Topic ID sẽ reset khi bot khởi động lại
+• Đảm bảo bot có quyền gửi tin nhắn trong group/topic
+• Một số thao tác có thể yêu cầu reply tin nhắn của bot
+`;
+
+    await bot.sendMessage(msg.chat.id, helpMessage, {
+      parse_mode: 'Markdown',
+      message_thread_id: msg.message_thread_id
+    });
+
+  } catch (error) {
+    console.error('Error in gethelp command:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi hiển thị trợ giúp.', {
       message_thread_id: msg.message_thread_id
     });
   }
 });
 
-// Command để thay đổi Group ID
-bot.onText(/\/changeGroupId/, async (msg) => {
+// Command để kiểm tra cấu hình
+bot.onText(/\/checkconfig/, async (msg) => {
   try {
-    // Gửi tin nhắn yêu cầu nhập Group ID mới
-    const response = await bot.sendMessage(
-      msg.chat.id,
-      '📝 Vui lòng nhập Group ID mới:',
-      { reply_markup: { force_reply: true } }
-    );
+    const configInfo = `
+📋 *Cấu hình hiện tại:*
 
-    // Lưu message_id để kiểm tra reply sau này
-    const messageId = response.message_id;
+• Group ID: ${config.TELEGRAM_GROUP_ID}
+• Topic ID: ${config.TOPIC_ID || 'Chưa set'}
+`;
 
-    // Handler cho reply
-    const replyHandler = async (replyMsg) => {
-      // Kiểm tra xem có phải reply cho tin nhắn yêu cầu không
-      if (replyMsg.reply_to_message && replyMsg.reply_to_message.message_id === messageId) {
-        const newGroupId = replyMsg.text.trim();
-
-        // Validate Group ID
-        if (!newGroupId.startsWith('-') || isNaN(newGroupId.substring(1))) {
-          await bot.sendMessage(msg.chat.id, '❌ Group ID không hợp lệ. Vui lòng thử lại.');
-          return;
-        }
-
-        try {
-          // Lưu Group ID mới vào config
-          const oldGroupId = config.TELEGRAM_GROUP_ID;
-          config.TELEGRAM_GROUP_ID = newGroupId;
-
-          await bot.sendMessage(
-            msg.chat.id,
-            `✅ Đã cập nhật Group ID thành công!\n\nGroup ID cũ: ${oldGroupId}\nGroup ID mới: ${newGroupId}`
-          );
-
-          // Xóa handler sau khi hoàn thành
-          bot.removeListener('message', replyHandler);
-        } catch (error) {
-          console.error('Error updating Group ID:', error);
-          await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi cập nhật Group ID.');
-        }
-      }
-    };
-
-    // Thêm handler cho reply
-    bot.on('message', replyHandler);
+    await bot.sendMessage(msg.chat.id, configInfo, {
+      parse_mode: 'Markdown',
+      message_thread_id: msg.message_thread_id
+    });
 
   } catch (error) {
-    console.error('Error in changeGroupId command:', error);
-    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra. Vui lòng thử lại sau.');
+    console.error('Error checking config:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Có lỗi xảy ra khi kiểm tra cấu hình.');
   }
 });
